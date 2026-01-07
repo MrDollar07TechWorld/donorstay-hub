@@ -2,14 +2,15 @@ import { useState, useEffect, useRef } from 'react';
 import MainLayout from '@/components/layout/MainLayout';
 import { QRCodeSVG } from 'qrcode.react';
 import { Donor } from '@/types';
-import { getDonors } from '@/lib/storage';
-import { Download, IdCard, User, Phone, MapPin, Calendar, Gift } from 'lucide-react';
+import { getDonors, getPaymentsByDonor } from '@/lib/storage';
+import { Download, IdCard, User, Phone, MapPin, Calendar, Gift, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 
 const IDCards = () => {
   const [donors, setDonors] = useState<Donor[]>([]);
   const [selectedDonor, setSelectedDonor] = useState<Donor | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const cardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -17,12 +18,11 @@ const IDCards = () => {
   }, []);
 
   const generateQRData = (donor: Donor) => {
+    // QR code data - uses the permanent qrCode field
     return JSON.stringify({
+      qrCode: donor.qrCode,
       id: donor.donorId,
       name: donor.name,
-      visits: donor.visitHistory.length,
-      freeStays: donor.freeStaysRemaining,
-      totalDonation: donor.totalDonation,
     });
   };
 
@@ -33,7 +33,7 @@ const IDCards = () => {
         printWindow.document.write(`
           <html>
             <head>
-              <title>Donor ID Card</title>
+              <title>Donor ID Card - ${selectedDonor?.name}</title>
               <style>
                 body { margin: 0; padding: 20px; font-family: 'Inter', sans-serif; }
                 .card { width: 350px; }
@@ -50,27 +50,52 @@ const IDCards = () => {
     }
   };
 
+  const filteredDonors = donors.filter(d =>
+    d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    d.donorId.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    d.mobile.includes(searchTerm)
+  );
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
   return (
     <MainLayout title="ID Cards" subtitle="Generate QR-coded ID cards for donors">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Donor Selection */}
         <div className="card-elevated p-6">
-          <h2 className="text-lg font-serif font-semibold mb-4">Select Donor</h2>
+          <div className="mb-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search donors..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="input-styled pl-10"
+              />
+            </div>
+          </div>
           
-          {donors.length === 0 ? (
+          {filteredDonors.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <User className="w-12 h-12 mx-auto mb-3 opacity-50" />
               <p>No donors available. Add donors first.</p>
             </div>
           ) : (
             <div className="space-y-2 max-h-[500px] overflow-y-auto">
-              {donors.map((donor) => (
+              {filteredDonors.map((donor) => (
                 <button
                   key={donor.id}
                   onClick={() => setSelectedDonor(donor)}
                   className={`w-full p-4 rounded-lg text-left transition-all ${
                     selectedDonor?.id === donor.id
-                      ? 'bg-primary text-primary-foreground'
+                      ? 'bg-primary text-primary-foreground ring-2 ring-primary'
                       : 'bg-muted/50 hover:bg-muted text-foreground'
                   }`}
                 >
@@ -84,12 +109,12 @@ const IDCards = () => {
                         {donor.name.charAt(0).toUpperCase()}
                       </span>
                     </div>
-                    <div>
+                    <div className="flex-1">
                       <p className="font-medium">{donor.name}</p>
                       <p className={`text-sm ${
                         selectedDonor?.id === donor.id ? 'text-primary-foreground/70' : 'text-muted-foreground'
                       }`}>
-                        {donor.donorId}
+                        {donor.donorId} • {donor.freeRoomsEntitled - donor.freeRoomsUsed} free rooms
                       </p>
                     </div>
                   </div>
@@ -156,7 +181,7 @@ const IDCards = () => {
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Gift className="w-4 h-4 text-primary-foreground/60" />
-                    <span>Free Stays: {selectedDonor.freeStaysRemaining}</span>
+                    <span>Free Rooms: {selectedDonor.freeRoomsEntitled - selectedDonor.freeRoomsUsed}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <MapPin className="w-4 h-4 text-primary-foreground/60" />
@@ -178,14 +203,26 @@ const IDCards = () => {
 
               {/* Scan Info */}
               <div className="card-elevated p-4 mt-4">
-                <h3 className="font-medium text-foreground mb-2">QR Code Contains:</h3>
+                <h3 className="font-medium text-foreground mb-2">QR Code Information</h3>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Scanning this QR code will show the donor's current status:
+                </p>
                 <ul className="text-sm text-muted-foreground space-y-1">
-                  <li>• Donor ID: {selectedDonor.donorId}</li>
-                  <li>• Name: {selectedDonor.name}</li>
-                  <li>• Total Visits: {selectedDonor.visitHistory.length}</li>
-                  <li>• Free Stays Remaining: {selectedDonor.freeStaysRemaining}</li>
-                  <li>• Total Donation: ₹{selectedDonor.totalDonation.toLocaleString()}</li>
+                  <li>• <strong>Donor ID:</strong> {selectedDonor.donorId}</li>
+                  <li>• <strong>Name:</strong> {selectedDonor.name}</li>
+                  <li>• <strong>Total Visits:</strong> {selectedDonor.visitHistory.length}</li>
+                  <li>• <strong>Free Rooms Remaining:</strong> {selectedDonor.freeRoomsEntitled - selectedDonor.freeRoomsUsed} of {selectedDonor.freeRoomsEntitled}</li>
+                  <li>• <strong>Total Donation:</strong> {formatCurrency(selectedDonor.donationAmount)}</li>
+                  <li>• <strong>Payment Status:</strong> {(() => {
+                    const payments = getPaymentsByDonor(selectedDonor.id);
+                    if (payments.length === 0) return 'No payments';
+                    const pending = payments.filter(p => p.status !== 'completed').length;
+                    return pending > 0 ? `${pending} pending` : 'All completed';
+                  })()}</li>
                 </ul>
+                <p className="text-xs text-muted-foreground mt-3 italic">
+                  Note: QR code is generated once per donor and never changes.
+                </p>
               </div>
             </>
           ) : (
